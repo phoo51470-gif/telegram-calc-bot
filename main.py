@@ -1,5 +1,8 @@
 import os
 import re
+import asyncio
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -20,6 +23,18 @@ CATEGORIES = [
     "推送电报人数"
 ]
 
+# Render Free Web Service အလုပ်လုပ်ရန် Dummy Server
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
@@ -35,13 +50,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
-
 async def recalculate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို 0 သို့ ပြန်လည် စတင်လိုက်ပါပြီ (Recalculate Ready)။**\nစာရင်းအသစ်များကို Forward လုပ်ပေးနိုင်ပါပြီ။", parse_mode='Markdown')
+    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို 0 သို့ ပြန်လည် စတင်လိုက်ပါပြီ။**", parse_mode='Markdown')
 
 async def recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -84,13 +96,16 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN မရှိပါ။ Render Environment Variables တွင် ထည့်သွင်းပေးပါ။")
+        print("Error: BOT_TOKEN မရှိပါ။")
         exit(1)
+
+    # Dummy Web Server ကို Background တွင် Run ခိုင်းမည်
+    Thread(target=run_dummy_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("recalculate", recalculate))
     app.add_handler(CommandHandler("reset", recalculate))
     app.add_handler(CommandHandler("recheck", recheck))
