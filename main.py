@@ -1,6 +1,5 @@
 import os
 import re
-import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 from telegram import Update
@@ -10,6 +9,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 user_data_store = {}
 
+# စာရင်းတွင်း ပါဝင်မည့် ခေါင်းစဉ် အစဉ်လိုက်
 CATEGORIES = [
     "总进粉人数",
     "重粉人数",
@@ -23,16 +23,21 @@ CATEGORIES = [
     "推送电报人数"
 ]
 
-# Render Free Web Service အလုပ်လုပ်ရန် Dummy Server
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+# Render နှင့် UptimeRobot အတွက် Ping လက်ခံမည့် Dummy Web Server
+class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(b"Bot is running!")
+        self.wfile.write(b"Bot is alive and running!")
 
-def run_dummy_server():
+    # Logs တွေမှာ စာတွေအများကြီး ရှုပ်မနေအောင် ငြိမ်ထားခြင်း
+    def log_message(self, format, *args):
+        return
+
+def run_web_server():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def recalculate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို 0 သို့ ပြန်လည် စတင်လိုက်ပါပြီ။**", parse_mode='Markdown')
+    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို 0 သို့ ပြန်လည် စတင်လိုက်ပါပြီ (Recalculate Ready)။**\nစာရင်းအသစ်များကို Forward လုပ်ပေးနိုင်ပါပြီ။", parse_mode='Markdown')
 
 async def recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -96,11 +101,11 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN မရှိပါ။")
+        print("Error: BOT_TOKEN မရှိပါ။ Render Environment Variables တွင် ထည့်သွင်းပေးပါ။")
         exit(1)
 
-    # Dummy Web Server ကို Background တွင် Run ခိုင်းမည်
-    Thread(target=run_dummy_server, daemon=True).start()
+    # UptimeRobot / Render Web Service အတွက် Background Server စတင်ခြင်း
+    Thread(target=run_web_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
