@@ -7,8 +7,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# အသုံးပြုသူတစ်ဦးချင်းစီ၏ စာရင်းပေါင်းများကို သိမ်းဆည်းထားရန် Memory
-user_data_store = {}
+# User အလိုက် အပိုင်းအလိုက် စာရင်းများ သိမ်းဆည်းရန်
+# Structure: { user_id: { 'batches': [ {cat: val}, {cat: val} ], 'current': {cat: val} } }
+user_store = {}
 
 CATEGORIES = [
     "总进粉人数",
@@ -38,35 +39,69 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
+def init_user(user_id):
+    if user_id not in user_store:
+        user_store[user_id] = {
+            'batches': [],
+            'current': {cat: 0 for cat in CATEGORIES}
+        }
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    
+    user_store[user_id] = {
+        'batches': [],
+        'current': {cat: 0 for cat in CATEGORIES}
+    }
     msg = (
-        "👋 **မင်္ဂလာပါ! စာရင်းတွက်ချက်ပေးမည့် Bot မှ ကြိုဆိုပါတယ်။**\n\n"
-        "စာရင်းများကို အများကြီး Forward လုပ်၍ ပို့ပေးပါ။\n\n"
-        "📌 **အသုံးပြုနည်း:**\n"
-        "1. စာရင်းများကို Forward လုပ်ပြီး ပို့ပါ။ (Bot က ပေါင်းထားပါလိမ့်မည်)\n"
-        "2. ပို့ပြီးပါက စုစုပေါင်း အဖြေကြည့်ရန် **/total** ဟု ရိုက်ပါ။\n"
-        "3. စာရင်းအသစ် ပြန်စလိုပါက **/clear** ဟု ရိုက်ပါ။"
+        "👋 **စနစ်သစ်မှ ကြိုဆိုပါတယ်။**\n\n"
+        "📌 **အသုံးပြုနည်း လမ်းညွှန်:**\n"
+        "1. စာရင်းများ Forward လုပ်ပါ -> **/total** ရိုက်လျှင် လက်ရှိသုတ် စုစုပေါင်းကို ပြပါမည်။\n"
+        "2. စာရင်းပိတ်ချင်လျှင် **`----`** (မျဉ်းတား) ပို့ပါ -> နောက်ထပ် အသစ်များကို သီးသန့် ပြန်ပေါင်းပါမည်။\n"
+        "3. အပိုင်းအားလုံး၏ စုစုပေါင်း ပေါင်းလဒ် ကြည့်ချင်ပါက **/grand** (သို့) **/all** ဟု ရိုက်ပါ။\n"
+        "4. စာရင်းအားလုံး အစမှ ပြန်ဖျက်လိုပါက **/clear** ဟု ရိုက်ပါ။"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
-# စာရင်း အားလုံးကို ဖျက်ပြီး အသစ်ပြန်စရန် (/clear သို့မဟုတ် /reset)
 async def clear_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို ဖျက်ပြီးပါပြီ။ စာရင်းအသစ်များ Forward စတင်လုပ်နိုင်ပါပြီ။**", parse_mode='Markdown')
+    user_store[user_id] = {
+        'batches': [],
+        'current': {cat: 0 for cat in CATEGORIES}
+    }
+    await update.message.reply_text("🔄 **စာရင်း အားလုံး (အဟောင်းရော အသစ်ပါ) ရှင်းထုတ်လိုက်ပါပြီ။**", parse_mode='Markdown')
 
-# စုစုပေါင်း အဖြေထုတ်ပေးရန် (/total သို့မဟုတ် /recheck)
+# လက်ရှိ အပိုင်း (Current Batch) ရဲ့ Total ကို ပြရန်
 async def show_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
+    init_user(user_id)
 
-    response_text = "📊 **စုစုပေါင်း စာရင်း ပေါင်းလဒ် (TOTAL SUMMARY)**\n\n"
+    curr = user_store[user_id]['current']
+    batch_num = len(user_store[user_id]['batches']) + 1
+
+    response_text = f"📊 **အပိုင်း ({batch_num}) စုစုပေါင်း (TOTAL SUMMARY)**\n\n"
     for cat in CATEGORIES:
-        response_text += f"{cat}：{user_data_store[user_id][cat]}\n"
+        response_text += f"{cat}：{curr[cat]}\n"
+    
+    await update.message.reply_text(response_text, parse_mode='Markdown')
+
+# အပိုင်း အားလုံး (1 + 2 + ...) စုစုပေါင်း ပေါင်းလဒ် ကြည့်ရန်
+async def show_grand_total(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    init_user(user_id)
+
+    # Batches အားလုံး + Current ကို ပေါင်းမည်
+    grand_totals = {cat: 0 for cat in CATEGORIES}
+    
+    all_batches = user_store[user_id]['batches'] + [user_store[user_id]['current']]
+    
+    for b in all_batches:
+        for cat in CATEGORIES:
+            grand_totals[cat] += b[cat]
+
+    total_sections = len(all_batches)
+    response_text = f"🏆 **အပိုင်း (၁ မှ {total_sections} အထိ) စုစုပေါင်း ပေါင်းလဒ် (GRAND TOTAL)**\n\n"
+    for cat in CATEGORIES:
+        response_text += f"{cat}：{grand_totals[cat]}\n"
     
     await update.message.reply_text(response_text, parse_mode='Markdown')
 
@@ -90,13 +125,27 @@ def parse_line_value(line: str) -> int:
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
+    init_user(user_id)
 
     text = update.message.text
     if not text:
         return
 
+    # မင်း မျဉ်းတားလိုက်တာ (--- သို့မဟုတ် === ) စစ်ဆေးခြင်း
+    if re.match(r'^[-=_]{3,}$', text.strip()):
+        # လက်ရှိ အပိုင်းကို သိမ်းပြီး အသစ်ပြန်စမည်
+        user_store[user_id]['batches'].append(user_store[user_id]['current'])
+        user_store[user_id]['current'] = {cat: 0 for cat in CATEGORIES}
+        
+        batch_count = len(user_store[user_id]['batches'])
+        await update.message.reply_text(
+            f"🛑 **အပိုင်း ({batch_count}) စာရင်း ပိတ်လိုက်ပါပြီ!**\n"
+            f"ယခုမှစ၍ ပို့သမျှ စာရင်းများကို အပိုင်း ({batch_count + 1}) အဖြစ် အသစ်သီးသန့် ပေါင်းပေးပါမည်။", 
+            parse_mode='Markdown'
+        )
+        return
+
+    # ပုံမှန် စာရင်းများ ဖတ်ရှု ပေါင်းထည့်ခြင်း
     found_any = False
     lines = text.split('\n')
     
@@ -104,12 +153,11 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for cat in CATEGORIES:
             if cat in line:
                 val = parse_line_value(line)
-                user_data_store[user_id][cat] += val
+                user_store[user_id]['current'][cat] += val
                 found_any = True
 
     if found_any:
-        # Message များစွာ ပို့သည့်အခါ Chat ထဲ စာရှုပ်မနေစေရန် အောက်ပါအတိုင်း အသိပေးချက် သာပြမည်
-        await update.message.reply_text("✅ ပေါင်းထည့်လိုက်ပါပြီ။ စာရင်းအားလုံး ပို့ပြီးပါက စုစုပေါင်းကြည့်ရန် **/total** ဟု ရိုက်ပါ။", parse_mode='Markdown')
+        await update.message.reply_text("✅ ပေါင်းထည့်လိုက်ပါပြီ။", parse_mode='Markdown')
 
 if __name__ == '__main__':
     if not BOT_TOKEN:
@@ -121,11 +169,11 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("clear", clear_data))
     app.add_handler(CommandHandler("reset", clear_data))
     app.add_handler(CommandHandler("total", show_total))
-    app.add_handler(CommandHandler("recheck", show_total))
+    app.add_handler(CommandHandler("grand", show_grand_total))
+    app.add_handler(CommandHandler("all", show_grand_total))
     
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_message))
     
