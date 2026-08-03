@@ -7,8 +7,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-user_data_store = {}
-
 # စာရင်းတွင်း ပါဝင်မည့် ခေါင်းစဉ် အစဉ်လိုက်
 CATEGORIES = [
     "总进粉人数",
@@ -23,7 +21,7 @@ CATEGORIES = [
     "推送电报人数"
 ]
 
-# Render နှင့် UptimeRobot အတွက် Ping လက်ခံမည့် Dummy Web Server
+# Render နှင့် UptimeRobot အတွက် Health Check Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -31,7 +29,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is alive and running!")
 
-    # Logs တွေမှာ စာတွေအများကြီး ရှုပ်မနေအောင် ငြိမ်ထားခြင်း
     def log_message(self, format, *args):
         return
 
@@ -41,81 +38,85 @@ def run_web_server():
     server.serve_forever()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    
     msg = (
         "👋 **မင်္ဂလာပါ! စာရင်းတွက်ချက်ပေးမည့် Bot မှ ကြိုဆိုပါတယ်။**\n\n"
-        "စာရင်းများကို Forward လုပ်၍ ပို့ပေးပါ။\n\n"
-        "📌 **အသုံးပြုနိုင်သော Command များ:**\n"
-        "• /recheck - လက်ရှိ ပေါင်းထားသော စာရင်းများကို ပြန်စစ်ရန်\n"
-        "• /recalculate - စာရင်းဟောင်းများကို ဖျက်ပြီး အစမှ ပြန်တွက်ရန်\n"
-        "• /total - လက်ရှိ ပေါင်းလဒ် စုစုပေါင်းကို ကြည့်ရန်\n"
-        "• /help - ကူညီမည့် လမ်းညွှန်ချက်များ ကြည့်ရန်"
+        "စာရင်းများကို Forward လုပ်၍ ပို့ပေးပါ။\n"
+        "• Message တစ်ခုချင်းစီကို သီးသန့် ပေါင်းပေးမည်ဖြစ်ပါသည်။\n"
+        "• မျဉ်းတား (`---`) ပါပါက မျဉ်းအထက်နှင့် အောက်ကို သီးသန့် ခွဲတွက်ပေးပါမည်။"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
-async def recalculate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    await update.message.reply_text("🔄 **စာရင်း အားလုံးကို 0 သို့ ပြန်လည် စတင်လိုက်ပါပြီ (Recalculate Ready)။**\nစာရင်းအသစ်များကို Forward လုပ်ပေးနိုင်ပါပြီ။", parse_mode='Markdown')
-
-async def recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-
-    response_text = "📊 **လက်ရှိ စာရင်း စုစုပေါင်း စစ်ဆေးချက် (Recheck Summary)**\n\n"
-    for cat in CATEGORIES:
-        response_text += f"{cat}：{user_data_store[user_id][cat]}\n"
+# စာကြောင်းတစ်ကြောင်းအတွင်းမှ နောက်ဆုံးရလဒ် ဂဏန်းကို ရှာယူသည့် Function
+def parse_line_value(line: str) -> int:
+    # 20-1=19 ကဲ့သို့သော ညီမျှခြင်းပါပါက '=' အနောက်ဘက်မှ ဂဏန်းကို ယူမည်
+    if '=' in line:
+        after_equal = line.split('=')[-1]
+        numbers = re.findall(r'\d+', after_equal)
+        if numbers:
+            return int(numbers[0])
     
-    await update.message.reply_text(response_text, parse_mode='Markdown')
+    # 20-1 ကဲ့သို့ ညီမျှခြင်း မပါဘဲ နှုတ်ထားပါက တွက်ချက်မည်
+    minus_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+    if minus_match:
+        a, b = int(minus_match.group(1)), int(minus_match.group(2))
+        return a - b
+
+    # ရိုးရိုး ဂဏန်း ဖြစ်ပါက နောက်ဆုံးတွေ့သော ဂဏန်းကို ယူမည်
+    numbers = re.findall(r'\d+', line)
+    if numbers:
+        return int(numbers[-1])
+        
+    return 0
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {cat: 0 for cat in CATEGORIES}
-    
     text = update.message.text
     if not text:
         return
 
-    found_any = False
-    lines = text.split('\n')
+    # မျဉ်းတားများ ပါမပါ စစ်ဆေးပြီး အပိုင်းခွဲခြင်း (--- သို့မဟုတ် === သို့မဟုတ် ___ )
+    blocks = re.split(r'[-=_]{3,}', text)
     
-    for line in lines:
-        for cat in CATEGORIES:
-            if cat in line:
-                numbers = re.findall(r'\d+', line)
-                if numbers:
-                    val = int(numbers[-1])
-                    user_data_store[user_id][cat] += val
+    results_summary = []
+
+    for idx, block in enumerate(blocks):
+        block_totals = {cat: 0 for cat in CATEGORIES}
+        found_any = False
+        lines = block.split('\n')
+        
+        for line in lines:
+            for cat in CATEGORIES:
+                if cat in line:
+                    val = parse_line_value(line)
+                    block_totals[cat] += val
                     found_any = True
 
-    if found_any:
-        response_text = "✅ **ပေါင်းလဒ် စုစုပေါင်း (Total Summary)**\n\n"
-        for cat in CATEGORIES:
-            response_text += f"{cat}：{user_data_store[user_id][cat]}\n"
-        
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        if found_any:
+            summary_str = ""
+            if len(blocks) > 1:
+                summary_str += f"📍 **အပိုင်း ({idx + 1}) ပေါင်းလဒ်**\n"
+            else:
+                summary_str += "✅ **ပေါင်းလဒ် စုစုပေါင်း (Total Summary)**\n"
+                
+            for cat in CATEGORIES:
+                summary_str += f"{cat}：{block_totals[cat]}\n"
+            
+            results_summary.append(summary_str)
+
+    if results_summary:
+        final_response = "\n-----------------------\n".join(results_summary)
+        await update.message.reply_text(final_response, parse_mode='Markdown')
 
 if __name__ == '__main__':
     if not BOT_TOKEN:
         print("Error: BOT_TOKEN မရှိပါ။ Render Environment Variables တွင် ထည့်သွင်းပေးပါ။")
         exit(1)
 
-    # UptimeRobot / Render Web Service အတွက် Background Server စတင်ခြင်း
     Thread(target=run_web_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
-    app.add_handler(CommandHandler("recalculate", recalculate))
-    app.add_handler(CommandHandler("reset", recalculate))
-    app.add_handler(CommandHandler("recheck", recheck))
-    app.add_handler(CommandHandler("total", recheck))
-    
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_message))
     
     print("Bot 💡 စတင် အလုပ်လုပ်နေပါပြီ...")
