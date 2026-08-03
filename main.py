@@ -7,7 +7,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# စာရင်းတွင်း ပါဝင်မည့် ခေါင်းစဉ် အစဉ်လိုက်
 CATEGORIES = [
     "总进粉人数",
     "重粉人数",
@@ -21,7 +20,6 @@ CATEGORIES = [
     "推送电报人数"
 ]
 
-# Render နှင့် UptimeRobot အတွက် Health Check Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -33,7 +31,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         return
 
 def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
@@ -46,22 +44,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
-# စာကြောင်းတစ်ကြောင်းအတွင်းမှ နောက်ဆုံးရလဒ် ဂဏန်းကို ရှာယူသည့် Function
 def parse_line_value(line: str) -> int:
-    # 20-1=19 ကဲ့သို့သော ညီမျှခြင်းပါပါက '=' အနောက်ဘက်မှ ဂဏန်းကို ယူမည်
     if '=' in line:
         after_equal = line.split('=')[-1]
         numbers = re.findall(r'\d+', after_equal)
         if numbers:
             return int(numbers[0])
     
-    # 20-1 ကဲ့သို့ ညီမျှခြင်း မပါဘဲ နှုတ်ထားပါက တွက်ချက်မည်
     minus_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
     if minus_match:
         a, b = int(minus_match.group(1)), int(minus_match.group(2))
         return a - b
 
-    # ရိုးရိုး ဂဏန်း ဖြစ်ပါက နောက်ဆုံးတွေ့သော ဂဏန်းကို ယူမည်
     numbers = re.findall(r'\d+', line)
     if numbers:
         return int(numbers[-1])
@@ -73,9 +67,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # မျဉ်းတားများ ပါမပါ စစ်ဆေးပြီး အပိုင်းခွဲခြင်း (--- သို့မဟုတ် === သို့မဟုတ် ___ )
     blocks = re.split(r'[-=_]{3,}', text)
-    
     results_summary = []
 
     for idx, block in enumerate(blocks):
@@ -108,7 +100,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN မရှိပါ။ Render Environment Variables တွင် ထည့်သွင်းပေးပါ။")
+        print("Error: BOT_TOKEN မရှိပါ။")
         exit(1)
 
     Thread(target=run_web_server, daemon=True).start()
